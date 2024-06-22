@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration and allow cross-origin queries
 const options = {
-  origin: '*',
+  origin: 'https://portfolio-hanh-5qvr.vercel.app',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: 'Origin, X-Requested-With, Content, Accept, Content-Type, Authorization',
 };
