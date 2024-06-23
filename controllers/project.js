@@ -4,15 +4,17 @@ const Project = require('../models/project');
 const cloudinary = require('../cloudinaryConfig');
 
 const getPublicId = (imageUrl) => imageUrl.split('/').pop().split('.')[0];
+const IMAGE_KEY = ['image_cover_large', 'image_cover_medium', 'image_cover_small', 'image_min_large', 'image_min_medium', 'image_min_small'];
 
 exports.getAllProjectImages = async (req, res, next) => {
   try {
-    Project.find()
-      .select('image_cover')
-      .then((projects) => {
-        res.json({ data: projects });
-      })
-      .catch((error) => next(error));
+    const images = await Project.find().select('image_cover_large image_cover_medium image_cover_small');
+    const imagesOject = images.map((image) => ({
+      image_cover_large: image.image_cover_large,
+      image_cover_medium: image.image_cover_medium,
+      image_cover_small: image.image_cover_small,
+    }));
+    res.json({ data: imagesOject });
   } catch (error) {
     next(error);
   }
@@ -51,14 +53,24 @@ exports.addProject = async (req, res, next) => {
     if (!title || !subTitle || !description || !technologies) {
       throw new RequestError('Missing Data');
     }
+
     const img = buildImgUrl(projectObject.title);
-    const resultCover = await uploaderCoverImg(img, req.file.path);
-    const resultMin = await uploaderMinImg(img, req.file.path);
+    const resultCoverLarge = await uploaderImg(`cover_large_${img}`, req.files['image_cover_large'][0].path);
+    const resultCoverMedium = await uploaderImg(`cover_medium_${img}`, req.files['image_cover_medium'][0].path);
+    const resultCoverSmall = await uploaderImg(`cover_small_${img}`, req.files['image_cover_small'][0].path);
+    const resultCoverMinLarge = await uploaderImg(`min_large_${img}`, req.files['image_min_large'][0].path);
+    const resultCoverMinMedium = await uploaderImg(`min_medium_${img}`, req.files['image_min_medium'][0].path);
+    const resultCoverMinSmall = await uploaderImg(`min_small_${img}`, req.files['image_min_small'][0].path);
+
     delete projectObject._id;
     const newProject = new Project({
       ...projectObject,
-      image_cover: `${resultCover}`,
-      image_min: `${resultMin}`,
+      image_cover_large: `${resultCoverLarge}`,
+      image_cover_medium: `${resultCoverMedium}`,
+      image_cover_small: `${resultCoverSmall}`,
+      image_min_large: `${resultCoverMinLarge}`,
+      image_min_medium: `${resultCoverMinMedium}`,
+      image_min_small: `${resultCoverMinSmall}`,
     });
 
     await newProject.save();
@@ -69,27 +81,29 @@ exports.addProject = async (req, res, next) => {
   }
 };
 
-const uploaderCoverImg = async (imgName, path) => {
-  const coverImg = `couverture_${imgName}`;
+const uploaderImg = async (imgName, path) => {
   const resultCover = await cloudinary.uploader.upload(path, {
+    folder: 'porfolio-hanh',
     resource_type: 'image',
-    public_id: coverImg,
+    public_id: imgName,
   });
   return resultCover.secure_url;
 };
 
-const uploaderMinImg = async (imgName, path) => {
-  const minImg = `miniature_${imgName}`;
-  const resultMin = await cloudinary.uploader.upload(path, {
-    resource_type: 'image',
-    public_id: minImg,
-    transformation: [{ x: 50, width: 400, height: 400, crop: 'crop', gravity: 'north_west' }],
-  });
-  return resultMin.secure_url;
-};
-
 const buildImgUrl = (projectTitle) => {
   return `${projectTitle.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
+};
+
+const processImage = async (files, propertyName, imageType, img) => {
+  if (files[imageType]) {
+    const result = await uploaderImg(`${propertyName}_${img}`, files[imageType][0].path);
+    return result;
+  }
+  return null;
+};
+const extractPart = (fullString) => {
+  const parts = fullString.split('_');
+  return parts.slice(1).join('_');
 };
 
 exports.updateProject = async (req, res, next) => {
@@ -104,26 +118,19 @@ exports.updateProject = async (req, res, next) => {
       throw new ProjectError('This project does not exist !', 404);
     }
 
-    if (req.file) {
-      const img = buildImgUrl(project.title);
-      const resultCover = await uploaderCoverImg(img, req.file.path);
-      const resultMin = await uploaderMinImg(img, req.file.path);
+    let projectObject = JSON.parse(req.body.project);
 
-      projectObject = {
-        ...JSON.parse(req.body.project),
-        image_cover: `${resultCover}`,
-        image_min: `${resultMin}`,
-      };
-    } else {
-      projectObject = { ...JSON.parse(req.body.project) };
+    if (req.files && Object.keys(req.files).length > 0) {
+      const img = buildImgUrl(projectObject.title);
+      for (const imageType of IMAGE_KEY) {
+        const propertyName = extractPart(imageType);
+        const result = await processImage(req.files, propertyName, imageType, img);
+        if (result) {
+          projectObject[`image_${propertyName}`] = result;
+        }
+      }
     }
-
     await Project.updateOne({ _id: projectId }, { ...projectObject, _id: projectId });
-
-    if (req.file) {
-      await cloudinary.uploader.destroy(getPublicId(project.image_cover));
-      await cloudinary.uploader.destroy(getPublicId(project.image_min));
-    }
     return res.status(200).json({ message: 'Project updated' });
   } catch (error) {
     next(error);
@@ -141,8 +148,12 @@ exports.deleteProject = async (req, res, next) => {
       throw new ProjectError('This project does not exist !', 404);
     }
 
-    await cloudinary.uploader.destroy(getPublicId(project.image_cover));
-    await cloudinary.uploader.destroy(getPublicId(project.image_min));
+    await cloudinary.uploader.destroy(getPublicId(project.image_cover_large));
+    await cloudinary.uploader.destroy(getPublicId(project.image_cover_small));
+    await cloudinary.uploader.destroy(getPublicId(project.image_cover_medium));
+    await cloudinary.uploader.destroy(getPublicId(project.image_min_large));
+    await cloudinary.uploader.destroy(getPublicId(project.image_min_medium));
+    await cloudinary.uploader.destroy(getPublicId(project.image_min_small));
     await Project.deleteOne({ _id: projectId });
     return res.status(204).json();
   } catch (error) {
